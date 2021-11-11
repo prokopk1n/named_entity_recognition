@@ -1,4 +1,20 @@
 import numpy as np
+import re
+import time
+
+def make_sentences_list(data_train):
+	SENTENCE_REGEX = r"(?m)(?:(?<=[ \n])|(?<=^))(?:(?:[иИ]м\.|(?:[А-Я]\.){1,2}|\.[ \n]*[а-я0-9]|[^.!? \n]+)[ \n]*)+(" \
+	                 r"?:[.?!](?:\"|»)|\.)(?=[ \n]|$)"
+	sentences = []
+	for text, _ in data_train:
+		cur_pos = 0
+		while True:
+			sentence = re.search(SENTENCE_REGEX, text)
+			if sentence is None:
+				break
+			sentences.append((sentence.group(), cur_pos + sentence.start(), cur_pos + sentence.end()))
+			text = text[sentence.end():]
+			cur_pos += sentence.end()
 
 
 def create_word2vec(filename):
