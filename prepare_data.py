@@ -37,7 +37,7 @@ def search_pos_in_labels(pos, marks):
 	return None
 
 def create_labels_list(word_list, marks):
-	# marks - тройка, нгачало, конец
+	# marks - множество троек (начало, конец, имя)
 	labels_list = []
 	i = 0
 	size = len(word_list)
@@ -72,14 +72,12 @@ def create_full_word_list(sentences_list):
 def create_words_labels_pairs_list(train_data):
 	# список пар - список троек слов и список меток
 	result = []
-	number = 0
 	for text, labels in train_data:
 		sentences_list = make_sentences_list(text)
 		word_list = create_full_word_list(sentences_list)
-		marks_list = list(labels.items())[0][1]
-		labels_list = create_labels_list(word_list, marks_list)
-		result.append((word_list, labels_list))
-		number += 1
+		for _, label in labels.items():
+			labels_list = create_labels_list(word_list, label)
+			result.append((word_list, labels_list))
 	return result
 
 
