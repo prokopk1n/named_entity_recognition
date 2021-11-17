@@ -14,7 +14,7 @@ class Solution:
 	def __init__(self):
 		self.embedding_path = "/embeddings/w2v_size100_window5.txt"
 		self.keyedvector_model = gensim.models.KeyedVectors.load_word2vec_format(self.embedding_path)
-		self.time = 750
+		self.time = 1500
 		self.epochs = 10
 		self.tag_to_ix = {"B-ORGANIZATION": 0, "I-ORGANIZATION": 1, "B-PERSON": 2, "I-PERSON": 3, "O": 4}
 		self.date_regex = re.compile(date_regex.DATE_REGEXP_FULL)
@@ -36,7 +36,7 @@ class Solution:
 
 		optimizer = optim.SGD(self.model.parameters(), lr=0.01, weight_decay=1e-4)
 
-		self.model.train()
+		# self.model.train()
 		start = time.time()
 
 		for j in range(0, self.epochs):
@@ -52,17 +52,19 @@ class Solution:
 
 	def predict(self, texts):
 		res = []
-		for text in texts:
-			word_list = create_full_word_list(make_sentences_list(text))
-			vector_of_text = prepare_sequence(word_list, self.keyedvector_model)
-			predicted = tag_decoder(self.model(vector_of_text)[1], self.tag_to_ix)
-			result_set = labels_decoder(predicted, word_list)
 
-			result = re.finditer(self.date_regex, text)
-			for match in result:
-				result_set.add((match.start(), match.end(), "DATE"))
+		with torch.no_grad():
+			for text in texts:
+				word_list = create_full_word_list(make_sentences_list(text))
+				vector_of_text = prepare_sequence(word_list, self.keyedvector_model)
+				predicted = tag_decoder(self.model(vector_of_text)[1], self.tag_to_ix)
+				result_set = labels_decoder(predicted, word_list)
 
-			res.append(result_set)
+				result = re.finditer(self.date_regex, text)
+				for match in result:
+					result_set.add((match.start(), match.end(), "DATE"))
+
+				res.append(result_set)
 
 		return res
 
