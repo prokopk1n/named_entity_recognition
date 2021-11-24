@@ -11,11 +11,71 @@ import date_regex
 from preprocessing_json import preprocess_json
 
 
+# список предложений всех текстов, где предложение это список из элементов ((слово, начало, конец), метка))
+def create_sentences_list_of_word(words_labels_pairs_list):
+	res = []
+	for i in range(0, len(words_labels_pairs_list)):
+		j = 0
+		while j < len(words_labels_pairs_list[i][0]):
+			buf = []
+			while j < len(words_labels_pairs_list[i][0]) and words_labels_pairs_list[i][0][j][0] != ".":
+				buf.append((words_labels_pairs_list[i][0][j], words_labels_pairs_list[i][1][j]))
+				j += 1
+			buf.append((words_labels_pairs_list[i][0][j], words_labels_pairs_list[i][1][j]))
+			j += 1
+			res.append(buf)
+	return res
+
+# формируем обучащие данные
+def create_train_x_y(sentences, model, tag_to_ix):
+	train_x = []
+	train_y = []
+	for sentence in sentences:
+		labels = ["O"]
+		string_sentence = " ".join([word[0][0] for word in sentence])
+		string_sentence = "[CLS] " + string_sentence + " [SEP]"
+		# print(string_sentence)
+		# time.sleep(1)
+		tokenized_text = model.tokenizer.tokenize(string_sentence)
+		i = 1
+		j = 0  # Для итерации по предложению
+		buf = ""
+		while i < len(tokenized_text) - 1:
+			if sentence[j][1][
+				0] == "B":  # если слово с меткой B-... разиблось на несколько слов, то B-... ставится только самой первой части
+				if buf == "":
+					labels.append(sentence[j][1])
+				else:
+					labels.append("I-" + sentence[j][1].split("-")[1])
+			else:
+				labels.append(sentence[j][1])
+			if tokenized_text[i][:2] == '##':
+				buf += tokenized_text[i][2:]
+			else:
+				buf += tokenized_text[i]
+			if len(buf) >= len(sentence[j][0][0]):
+				buf = ""
+				j += 1
+			i += 1
+		"""
+		for tup in zip(tokenized_text, labels):
+			print(f'{tup[0]}   {tup[1]}')
+		input()
+		"""
+		labels.append("O")
+		train_x.append(tokenized_text)
+		train_y.append([tag_to_ix[label] for label in labels])
+		# test(tokenized_text, labels, sentence)
+		# print_text_with_labels(string_sentence, res_buf)
+		# input()
+
+	return train_x, train_y
+
 class Solution:
 
 	def __init__(self):
 		self.embedding_path = 'DeepPavlov/rubert-base-cased' # 'rubert_cased_L-12_H-768_A-12_pt/' '/embeddings/ruBert-base/'
-		self.time = 1200
+		self.time = 150
 		self.epochs = 100
 		self.tag_to_ix = {"B-ORGANIZATION": 0, "I-ORGANIZATION": 1, "B-PERSON": 2, "I-PERSON": 3, "O": 4}
 		self.date_regex = re.compile(date_regex.DATE_REGEXP_FULL)
@@ -26,66 +86,12 @@ class Solution:
 
 		words_labels_pairs_list = create_words_labels_pairs_list(train_data)
 
-		"""
-		sentences_list = []
-		for text, _ in train_data:
-			sentences_list.append(make_sentences_list(text))
-		"""
+		# список предложений всех текстов, где предложение это список из элементов ((слово, начало, конец), метка))
+		sentences = create_sentences_list_of_word(words_labels_pairs_list)
 
-		train_x = []
-		train_y = []
+		train_x, train_y = create_train_x_y(sentences, self.model, self.tag_to_ix)
 
-		res = []
-		for i in range(0, len(words_labels_pairs_list)):
-			j = 0
-			while j < len(words_labels_pairs_list[i][0]):
-				buf = []
-				while j < len(words_labels_pairs_list[i][0]) and words_labels_pairs_list[i][0][j][0] != ".":
-					buf.append((words_labels_pairs_list[i][0][j], words_labels_pairs_list[i][1][j]))
-					j+=1
-				buf.append((words_labels_pairs_list[i][0][j], words_labels_pairs_list[i][1][j]))
-				j+=1
-				res.append(buf)    # список предложений, где предложение это список из элементов ((слово, начало, конец), метка))
-
-		for sentence in res:
-			labels = ["O"]
-			string_sentence = " ".join([word[0][0] for word in sentence])
-			string_sentence = "[CLS] " + string_sentence + " [SEP]"
-			# print(string_sentence)
-			# time.sleep(1)
-			tokenized_text = self.model.tokenizer.tokenize(string_sentence)
-			i = 1
-			j = 0   # Для итерации по предложению
-			buf = ""
-			while i < len(tokenized_text) - 1:
-				if sentence[j][1][0] == "B": # если слово с меткой B-... разиблось на несколько слов, то B-... ставится только самой первой части
-					if buf == "":
-						labels.append(sentence[j][1])
-					else:
-						labels.append("I-" + sentence[j][1].split("-")[1])
-				else:
-					labels.append(sentence[j][1])
-				if tokenized_text[i][:2] == '##':
-					buf += tokenized_text[i][2:]
-				else:
-					buf += tokenized_text[i]
-				if len(buf) >= len(sentence[j][0][0]):
-					buf = ""
-					j += 1
-				i += 1
-			"""
-			for tup in zip(tokenized_text, labels):
-				print(f'{tup[0]}   {tup[1]}')
-			input()
-			"""
-			labels.append("O")
-			train_x.append(tokenized_text)
-			train_y.append([self.tag_to_ix[label] for label in labels])
-			# test(tokenized_text, labels, sentence)
-			# print_text_with_labels(string_sentence, res_buf)
-			# input()
-
-		# train_xxx = [torch.tensor(x,  dtype=torch.long) for x in train_x]
+		# преобразуем в tensor, так как модель возвращает tensor
 		train_yyy = [torch.tensor(y, dtype=torch.long) for y in train_y]
 
 		optimizer = optim.SGD(self.model.parameters(), lr=0.01, weight_decay=1e-4)
