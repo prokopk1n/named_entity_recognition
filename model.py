@@ -1,7 +1,7 @@
 import gensim
 import torch.nn as nn
 import torch
-
+from transformers import BertModel, BertTokenizer
 
 START_TAG = "<START>"
 STOP_TAG = "<STOP>"
@@ -20,12 +20,10 @@ class BiLSTM_CRF(nn.Module):
 		self.tag_to_ix[STOP_TAG] = len(self.tag_to_ix)
 		self.tagset_size = len(self.tag_to_ix)
 
-		self.word_vectors = gensim.models.KeyedVectors.load_word2vec_format(embedding_path)
-		weights = torch.FloatTensor(self.word_vectors.vectors)
-		self.embedding = nn.Embedding.from_pretrained(weights)
+		self.tokenizer = BertTokenizer.from_pretrained(embedding_path, output_hidden_states=True)
+		self.bert_model = BertModel.from_pretrained(embedding_path, output_hidden_states=True)
 
-		self.word_vectors = gensim.models.KeyedVectors.load_word2vec_format(embedding_path)
-		self.embedding_dim = self.word_vectors.vector_size
+		self.embedding_dim = 768
 
 		self.lstm = nn.LSTM(self.embedding_dim, lstm_size // 2, num_layers=1, bidirectional=True)
 		self.hidden2tag = nn.Linear(lstm_size, self.tagset_size)
@@ -36,8 +34,15 @@ class BiLSTM_CRF(nn.Module):
 		self.transitions.data[:, self.tag_to_ix[STOP_TAG]] = -10000
 
 	def _get_embedded(self, sentence):
-		sentence = torch.tensor(sentence, dtype=torch.long)
-		return self.embedding(sentence)
+		tokenized_text = sentence
+		indexed_tokens = self.tokenizer.convert_tokens_to_ids(tokenized_text)
+		segments_ids = [1] * len(tokenized_text)
+		tokens_tensor = torch.tensor([indexed_tokens])
+		segments_tensors = torch.tensor([segments_ids])
+		self.bert_model.eval()
+		with torch.no_grad():
+			outputs = self.bert_model(tokens_tensor, segments_tensors)
+			return outputs[0]
 
 	def _get_lstm_features(self, sentence):
 		self.hidden = self.init_hidden()
