@@ -37,12 +37,13 @@ def create_train_x_y(sentences, model, tag_to_ix):
 		# print(string_sentence)
 		# time.sleep(1)
 		tokenized_text = model.tokenizer.tokenize(string_sentence)
+		if len(sentence) == 0:
+			continue
 		i = 1
 		j = 0  # Для итерации по предложению
 		buf = ""
 		while i < len(tokenized_text) - 1:
-			if sentence[j][1][
-				0] == "B":  # если слово с меткой B-... разиблось на несколько слов, то B-... ставится только самой первой части
+			if sentence[j][1][0] == "B":  # если слово с меткой B-... разиблось на несколько слов, то B-... ставится только самой первой части
 				if buf == "":
 					labels.append(sentence[j][1])
 				else:
@@ -57,11 +58,8 @@ def create_train_x_y(sentences, model, tag_to_ix):
 				buf = ""
 				j += 1
 			i += 1
-		"""
-		for tup in zip(tokenized_text, labels):
-			print(f'{tup[0]}   {tup[1]}')
-		input()
-		"""
+		if j != len(sentence):
+			continue
 		labels.append("O")
 		train_x.append(tokenized_text)
 		train_y.append([tag_to_ix[label] for label in labels])
@@ -74,9 +72,9 @@ def create_train_x_y(sentences, model, tag_to_ix):
 class Solution:
 
 	def __init__(self):
-		self.embedding_path = 'DeepPavlov/rubert-base-cased' # 'rubert_cased_L-12_H-768_A-12_pt/' '/embeddings/ruBert-base/'
-		self.time = 150
-		self.epochs = 100
+		self.embedding_path = '/embeddings/rubert-base-cased/' # 'rubert_cased_L-12_H-768_A-12_pt/' '/embeddings/ruBert-base/'
+		self.time = 1500
+		self.epochs = 10
 		self.tag_to_ix = {"B-ORGANIZATION": 0, "I-ORGANIZATION": 1, "B-PERSON": 2, "I-PERSON": 3, "O": 4}
 		self.date_regex = re.compile(date_regex.DATE_REGEXP_FULL)
 
@@ -100,11 +98,11 @@ class Solution:
 		start = time.time()
 
 		for j in range(0, self.epochs):
-			print(f"EPOCH NUMBER {j} TIME = {time.time()} TOTAL STEPS = {len(train_x)}")
+			# print(f"EPOCH NUMBER {j} TIME = {time.time()} TOTAL STEPS = {len(train_x)}")
 			self.model.train()
 			for i in range(0, len(train_x)):
-				if i % 100 == 0:
-					print(f"STEP NUMBER {i} EPOCH NUMBER {j} TIME = {time.time()}")
+				# if i % 100 == 0:
+				#	print(f"STEP NUMBER {i} EPOCH NUMBER {j} TIME = {time.time()}")
 				self.model.zero_grad()
 				loss = self.model.neg_log_likelihood(train_x[i], train_yyy[i])
 				loss.backward()
@@ -199,6 +197,32 @@ def tag_decoder(tags, tag_to_ix):
 	return result
 
 
+def test1(test_string, tokenizer, sentence):
+	string_sentence = "[CLS] " + test_string + " [SEP]"
+	# print(string_sentence)
+	# time.sleep(1)
+	labels = []
+	tokenized_text = tokenizer.tokenize(string_sentence)
+	i = 1
+	j = 0  # Для итерации по предложению
+	buf = ""
+	while i < len(tokenized_text) - 1:
+		if sentence[j][1][0] == "B":  # если слово с меткой B-... разиблось на несколько слов, то B-... ставится только самой первой части
+			if buf == "":
+				labels.append(sentence[j][1])
+			else:
+				labels.append("I-" + sentence[j][1].split("-")[1])
+		else:
+			labels.append(sentence[j][1])
+		if tokenized_text[i][:2] == '##':
+			buf += tokenized_text[i][2:]
+		else:
+			buf += tokenized_text[i]
+		if len(buf) >= len(sentence[j][0]): # вот тут для теста исправил
+			buf = ""
+			j += 1
+		i += 1
+
 def test(train_x, train_y, sentence):
 	print(train_x)
 	print(train_y)
@@ -213,7 +237,6 @@ if __name__ == "__main__":
 	                     # [("asdas", 0, 5), ("asdasdas", 6, 13), ("dasdasads", 14, 23)],
 	                     # ["[CLS]", "as", "##das", "asdasdas", "dasdasads", "[SEP]"]))
 	# print_text_with_labels(train_data[0][0], train_data[0][1]["DAoLAoDRnjHrmkGYw"])
-
 
 	train_data = preprocess_json("tpc-dataset.train.json")
 	words_labels_pairs_list = create_words_labels_pairs_list(train_data)
