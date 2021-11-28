@@ -1,7 +1,6 @@
 import gensim
 import torch.nn as nn
 import torch
-from transformers import BertModel, BertTokenizer
 
 START_TAG = "<START>"
 STOP_TAG = "<STOP>"
@@ -20,9 +19,6 @@ class BiLSTM_CRF(nn.Module):
 		self.tag_to_ix[STOP_TAG] = len(self.tag_to_ix)
 		self.tagset_size = len(self.tag_to_ix)
 
-		self.tokenizer = BertTokenizer.from_pretrained(embedding_path, output_hidden_states=True)
-		self.bert_model = BertModel.from_pretrained(embedding_path, output_hidden_states=True)
-
 		self.embedding_dim = 768
 
 		self.lstm = nn.LSTM(self.embedding_dim, lstm_size // 2, num_layers=1, bidirectional=True)
@@ -33,22 +29,12 @@ class BiLSTM_CRF(nn.Module):
 		self.transitions.data[self.tag_to_ix[START_TAG], :] = -10000
 		self.transitions.data[:, self.tag_to_ix[STOP_TAG]] = -10000
 
-	def _get_embedded(self, sentence):
-		tokenized_text = sentence
-		indexed_tokens = self.tokenizer.convert_tokens_to_ids(tokenized_text)
-		segments_ids = [1] * len(tokenized_text)
-		tokens_tensor = torch.tensor([indexed_tokens])
-		segments_tensors = torch.tensor([segments_ids])
-		self.bert_model.eval()
-		with torch.no_grad():
-			outputs = self.bert_model(tokens_tensor, segments_tensors)
-			return outputs[0]
-
 	def _get_lstm_features(self, sentence):
 		self.hidden = self.init_hidden()
-		embeds = self._get_embedded(sentence).view(len(sentence), 1, -1) # трехмерная матрица, -1 - неизвестно сколько точно, высчитается по формуле
+		sentence_embedding, sentence_len = sentence
+		embeds = sentence_embedding.view(sentence_len, 1, -1) # трехмерная матрица, -1 - неизвестно сколько точно, высчитается по формуле
 		lstm_out, self.hidden = self.lstm(embeds, self.hidden)
-		lstm_out = lstm_out.view(len(sentence), self.hidden_dim)
+		lstm_out = lstm_out.view(sentence_len, self.hidden_dim)
 		lstm_feats = self.hidden2tag(lstm_out)
 		return lstm_feats
 

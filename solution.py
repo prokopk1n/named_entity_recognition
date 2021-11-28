@@ -1,14 +1,16 @@
 import re
 from prepare_data import create_words_labels_pairs_list, prepare_sequence, make_sentences_list, \
 	create_full_word_list, print_text_with_labels
-import gensim
-import time
+import matplotlib.pyplot as plt
 from model import BiLSTM_CRF
 import torch
 import torch.optim as optim
 import time
 import date_regex
 from preprocessing_json import preprocess_json
+from nerc_quality import QualityNERC
+import matplotlib.ticker as ticker
+from transformers import BertModel, BertTokenizer
 
 
 # список предложений всех текстов, где предложение это список из элементов ((слово, начало, конец), метка))
@@ -27,7 +29,7 @@ def create_sentences_list_of_word(words_labels_pairs_list):
 	return res
 
 # формируем обучащие данные
-def create_train_x_y(sentences, model, tag_to_ix):
+def create_train_x_y(sentences, tokenizer, tag_to_ix):
 	train_x = []
 	train_y = []
 	for sentence in sentences:
@@ -36,7 +38,7 @@ def create_train_x_y(sentences, model, tag_to_ix):
 		string_sentence = "[CLS] " + string_sentence + " [SEP]"
 		# print(string_sentence)
 		# time.sleep(1)
-		tokenized_text = model.tokenizer.tokenize(string_sentence)
+		tokenized_text = tokenizer.tokenize(string_sentence)
 		if len(sentence) == 0:
 			continue
 		i = 1
@@ -72,43 +74,56 @@ def create_train_x_y(sentences, model, tag_to_ix):
 class Solution:
 
 	def __init__(self):
-		self.embedding_path = '/embeddings/rubert-base-cased/' # 'rubert_cased_L-12_H-768_A-12_pt/' '/embeddings/ruBert-base/'
-		self.time = 1500
-		self.epochs = 10
+		self.embedding_path = '/embeddings/rubert-base-cased/'   #'DeepPavlov/rubert-base-cased' # '/embeddings/rubert-base-cased/' # 'rubert_cased_L-12_H-768_A-12_pt/' '/embeddings/ruBert-base/'
+		self.time = 28 * 60
+		self.epochs = 3
 		self.tag_to_ix = {"B-ORGANIZATION": 0, "I-ORGANIZATION": 1, "B-PERSON": 2, "I-PERSON": 3, "O": 4}
 		self.date_regex = re.compile(date_regex.DATE_REGEXP_FULL)
-
-	def train(self, train_data):
+		self.tokenizer = BertTokenizer.from_pretrained(self.embedding_path, output_hidden_states=True)
+		self.bert_model = BertModel.from_pretrained(self.embedding_path, output_hidden_states=True)
 		lstm_size = 6
 		self.model = BiLSTM_CRF(self.tag_to_ix, lstm_size, self.embedding_path)
 
+	def _get_embedded(self, sentence):
+		tokenized_text = sentence
+		indexed_tokens = self.tokenizer.convert_tokens_to_ids(tokenized_text)
+		segments_ids = [1] * len(tokenized_text)
+		tokens_tensor = torch.tensor([indexed_tokens])
+		segments_tensors = torch.tensor([segments_ids])
+		self.bert_model.eval()
+		with torch.no_grad():
+			outputs = self.bert_model(tokens_tensor, segments_tensors)
+			return outputs[0]
+
+	def train(self, train_data):
+		start_train = time.time()
+		# print(f"START = {start_train}")
 		words_labels_pairs_list = create_words_labels_pairs_list(train_data)
 
 		# список предложений всех текстов, где предложение это список из элементов ((слово, начало, конец), метка))
 		sentences = create_sentences_list_of_word(words_labels_pairs_list)
 
-		train_x, train_y = create_train_x_y(sentences, self.model, self.tag_to_ix)
-
+		train_x, train_y = create_train_x_y(sentences, self.tokenizer, self.tag_to_ix)
+		train_xxx = [(self._get_embedded(train), len(train)) for train in train_x]
 		# преобразуем в tensor, так как модель возвращает tensor
 		train_yyy = [torch.tensor(y, dtype=torch.long) for y in train_y]
 
 		optimizer = optim.SGD(self.model.parameters(), lr=0.01, weight_decay=1e-4)
 
 		# self.model.train()
-		start = time.time()
 
 		for j in range(0, self.epochs):
-			# print(f"EPOCH NUMBER {j} TIME = {time.time()} TOTAL STEPS = {len(train_x)}")
+			start_epoch = time.time()
+			# print(f"EPOCH NUMBER {j} TIME = {time.time() - start_train} TOTAL STEPS = {len(train_xxx)}")
 			self.model.train()
-			for i in range(0, len(train_x)):
-				# if i % 100 == 0:
-				#	print(f"STEP NUMBER {i} EPOCH NUMBER {j} TIME = {time.time()}")
+			for i in range(0, len(train_xxx)):
 				self.model.zero_grad()
-				loss = self.model.neg_log_likelihood(train_x[i], train_yyy[i])
+				loss = self.model.neg_log_likelihood(train_xxx[i], train_yyy[i])
 				loss.backward()
 				optimizer.step()
-				if time.time() - start > self.time:
+				if time.time() - start_train > self.time:
 					return
+			# print(f"OUT OF EPOCH {j} TOTAL TIME = {time.time() - start_epoch}")
 
 	def predict(self, texts):
 		res = []
@@ -130,10 +145,10 @@ class Solution:
 				for sentence in sentences:
 					string_sentence = " ".join([word[0] for word in sentence])
 					string_sentence = "[CLS] " + string_sentence + " [SEP]"
-					tokenized_text = self.model.tokenizer.tokenize(string_sentence)
-					predicted = tag_decoder(self.model(tokenized_text)[1], self.tag_to_ix)
+					tokenized_text = self.tokenizer.tokenize(string_sentence)
+					embeds = (self._get_embedded(tokenized_text), len(tokenized_text))
+					predicted = tag_decoder(self.model(embeds)[1], self.tag_to_ix)
 					result_set.update(labels_decoder(predicted, sentence, tokenized_text))
-
 
 				result = re.finditer(self.date_regex, text)
 				for match in result:
@@ -141,6 +156,76 @@ class Solution:
 
 				res.append(result_set)
 		return res
+
+	def test(self, train_data):
+		test_time = 8 * 60 * 60
+		nerc_quality = QualityNERC()
+		test = train_data[:len(train_data)//10]
+		test_texts = [text for text, _ in test]
+		expected = [create_labels_set(labels) for _, labels in test]
+		train = train_data[len(train_data)//10:]
+		org_plot, person_plot, f_plot, x_plot = [], [], [], []
+		start = time.time()
+		for j in range(0, self.epochs):
+			start_epoch = time.time()
+			if start_epoch - start > test_time:
+				break
+			print(f"EPOCH NUMBER {j} TIME START = {start_epoch - start}")
+			self.train(train)
+			print(f"OUT OF TRAIN TIME = {time.time() - start_epoch}")
+			predicted = self.predict(test_texts)
+			f, f_dict = nerc_quality.evaluate(predicted, expected)
+			org_plot.append(f_dict["ORGANIZATION"])
+			person_plot.append(f_dict["PERSON"])
+			f_plot.append(f)
+			x_plot.append(j + 1)
+			print(f"OUT OF EPOCH {j} TOTAL TIME OF EPOCH = {time.time() - start_epoch}")
+			torch.save(self.model, f"model{j}.out")
+
+		print_plot(x_plot, f_plot, person_plot, org_plot, "test.png")
+		torch.save(self.model, "model.out")
+
+# вывод графика f-меры по эпохам
+def print_plot(x_plot, f_plot, person_plot, org_plot, filename):
+	print(f"ORGANIZATION = {org_plot}")
+	print(f"PERSON = {person_plot}")
+	print(f"FULL = {f_plot}")
+	fig, axs = plt.subplots(3)
+	fig.suptitle('F-MEASURE')
+
+	axs[0].set_title("ORGANIZATION")
+	axs[1].set_title("PERSON")
+	axs[2].set_title("F-FULL")
+
+	axs[0].axis([0, x_plot[-1] + 1, -0.2, 1])
+	axs[1].axis([0, x_plot[-1] + 1, -0.2, 1])
+	axs[2].axis([0, x_plot[-1] + 1, -0.2, 1])
+
+	axs[0].xaxis.set_major_locator(ticker.MultipleLocator(1))
+	axs[1].xaxis.set_major_locator(ticker.MultipleLocator(1))
+	axs[2].xaxis.set_major_locator(ticker.MultipleLocator(1))
+
+	axs[0].yaxis.set_major_locator(ticker.MultipleLocator(0.2))
+	axs[1].yaxis.set_major_locator(ticker.MultipleLocator(0.2))
+	axs[2].yaxis.set_major_locator(ticker.MultipleLocator(0.2))
+
+	axs[0].plot(x_plot, org_plot)
+	axs[1].plot(x_plot, person_plot)
+	axs[2].plot(x_plot, f_plot)
+
+	fig1 = plt.gcf()
+	fig1.savefig(filename, dpi=100)
+	plt.show()
+
+def create_labels_set(labels):
+	labels_list = [label for _, label in labels.items()]
+	if len(labels_list) == 1:
+		label = labels_list[0]
+	elif len(labels_list) == 2:
+		label = labels_list[0] & labels_list[1]
+	else:
+		label = labels_list[0] & labels_list[1] | labels_list[1] & labels_list[2] | labels_list[0] & labels_list[2]
+	return label
 
 
 def labels_decoder(labels_list, sentence, tokenized_text):
@@ -197,54 +282,37 @@ def tag_decoder(tags, tag_to_ix):
 	return result
 
 
-def test1(test_string, tokenizer, sentence):
-	string_sentence = "[CLS] " + test_string + " [SEP]"
-	# print(string_sentence)
-	# time.sleep(1)
-	labels = []
-	tokenized_text = tokenizer.tokenize(string_sentence)
-	i = 1
-	j = 0  # Для итерации по предложению
-	buf = ""
-	while i < len(tokenized_text) - 1:
-		if sentence[j][1][0] == "B":  # если слово с меткой B-... разиблось на несколько слов, то B-... ставится только самой первой части
-			if buf == "":
-				labels.append(sentence[j][1])
-			else:
-				labels.append("I-" + sentence[j][1].split("-")[1])
-		else:
-			labels.append(sentence[j][1])
-		if tokenized_text[i][:2] == '##':
-			buf += tokenized_text[i][2:]
-		else:
-			buf += tokenized_text[i]
-		if len(buf) >= len(sentence[j][0]): # вот тут для теста исправил
-			buf = ""
-			j += 1
-		i += 1
-
-def test(train_x, train_y, sentence):
-	print(train_x)
-	print(train_y)
-	print([word[0] for word in sentence])
-	result = labels_decoder(train_y, [word[0] for word in sentence], train_x)
-	print(result)
-	return result
-
-
 if __name__ == "__main__":
-	# print(labels_decoder(["O", "B-ORGANIZATION", "I-ORGANIZATION", "I-ORGANIZATION", "O", "O"],
-	                     # [("asdas", 0, 5), ("asdasdas", 6, 13), ("dasdasads", 14, 23)],
-	                     # ["[CLS]", "as", "##das", "asdasdas", "dasdasads", "[SEP]"]))
-	# print_text_with_labels(train_data[0][0], train_data[0][1]["DAoLAoDRnjHrmkGYw"])
-
 	train_data = preprocess_json("tpc-dataset.train.json")
-	words_labels_pairs_list = create_words_labels_pairs_list(train_data)
 	solution = Solution()
 	solution.train(train_data)
+	# torch.save(solution.model, "model6.out")
+	# solution.model = torch.load("model.out")
+	# solution.test(train_data)
+
 	labels_list = solution.predict([train_data[0][0], train_data[1][0]])
+	print_text_with_labels(train_data[0][0], labels_list[0])
+	print_text_with_labels(train_data[1][0], labels_list[1])
+	"""
+	lstm_size = 6
+	model = BiLSTM_CRF({"B-ORGANIZATION": 0, "I-ORGANIZATION": 1, "B-PERSON": 2, "I-PERSON": 3, "O": 4}, 6,
+	    'DeepPavlov/rubert-base-cased')
+	model.load_state_dict(torch.load("model.bin"))
+	model.eval()
+
+	# solution.train(train_data)
+	labels_list = solution.predict([train_data[0][0], train_data[1][0]])
+	nerc_quality = QualityNERC()
+	f, f_dict = nerc_quality.evaluate(labels_list, [train_data[0][1]["DAoLAoDRnjHrmkGYw"], train_data[1][1]["DAoLAoDRnjHrmkGYw"]])
+	plt.title("DATE")
+	plt.xlabel("EPOCHS")
+	plt.ylabel("F1")
+	plt.bar(["1", "2"], [f_dict['DATE'], f_dict['DATE']], width=0.1)
+	plt.show()
+	print(f"F = {f} ORG = {f_dict['ORGANIZATION']} DATE = {f_dict['DATE']} PERSON = {f_dict['PERSON']}")
 	print_text_with_labels(train_data[0][0], labels_list[0])
 	print_text_with_labels(train_data[1][0], labels_list[1])
 	while True:
 		string = input("ВВОДИ:")
 		solution.predict([string])
+	"""
