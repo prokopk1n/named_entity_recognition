@@ -1,7 +1,5 @@
-import gensim
 import torch.nn as nn
 import torch
-
 
 START_TAG = "<START>"
 STOP_TAG = "<STOP>"
@@ -20,12 +18,7 @@ class BiLSTM_CRF(nn.Module):
 		self.tag_to_ix[STOP_TAG] = len(self.tag_to_ix)
 		self.tagset_size = len(self.tag_to_ix)
 
-		self.word_vectors = gensim.models.KeyedVectors.load_word2vec_format(embedding_path)
-		weights = torch.FloatTensor(self.word_vectors.vectors)
-		self.embedding = nn.Embedding.from_pretrained(weights)
-
-		self.word_vectors = gensim.models.KeyedVectors.load_word2vec_format(embedding_path)
-		self.embedding_dim = self.word_vectors.vector_size
+		self.embedding_dim = 768
 
 		self.lstm = nn.LSTM(self.embedding_dim, lstm_size // 2, num_layers=1, bidirectional=True)
 		self.hidden2tag = nn.Linear(lstm_size, self.tagset_size)
@@ -35,15 +28,12 @@ class BiLSTM_CRF(nn.Module):
 		self.transitions.data[self.tag_to_ix[START_TAG], :] = -10000
 		self.transitions.data[:, self.tag_to_ix[STOP_TAG]] = -10000
 
-	def _get_embedded(self, sentence):
-		sentence = torch.tensor(sentence, dtype=torch.long)
-		return self.embedding(sentence)
-
 	def _get_lstm_features(self, sentence):
 		self.hidden = self.init_hidden()
-		embeds = self._get_embedded(sentence).view(len(sentence), 1, -1) # трехмерная матрица, -1 - неизвестно сколько точно, высчитается по формуле
+		sentence_embedding, sentence_len = sentence
+		embeds = sentence_embedding.view(sentence_len, 1, -1) # трехмерная матрица, -1 - неизвестно сколько точно, высчитается по формуле
 		lstm_out, self.hidden = self.lstm(embeds, self.hidden)
-		lstm_out = lstm_out.view(len(sentence), self.hidden_dim)
+		lstm_out = lstm_out.view(sentence_len, self.hidden_dim)
 		lstm_feats = self.hidden2tag(lstm_out)
 		return lstm_feats
 

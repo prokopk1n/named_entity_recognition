@@ -1,10 +1,9 @@
-import numpy as np
 import re
 
 
 def make_sentences_list(text):
 	# на вход список текстов, на выходе список троек (предложение, начало, конец)
-	SENTENCE_REGEX = r"(?:(?:[иИ]м\.|(?:[А-Я]\.){1,2}|\.[ \n]*[а-я0-9]|[^.!? \n]+)[ \n]*)+(?:[.?!](?:\"|»)|[.?!]|$)"
+	SENTENCE_REGEX = r"(?:(?:[иИ]м\.|(?:[А-Я]\.){1,2}|\.[ \n]*[а-я]|[^.!? \n]+)[ \n]*)+(?:[.?!](?:\"|»)|[.?!]|$)"
 	sentences = []
 	cur_pos = 0
 	while True:
@@ -18,7 +17,7 @@ def make_sentences_list(text):
 
 def make_words_list(sentence):
 	# на вход предложение, на выходе список троек (слово, начало, конец)
-	WORD_REGEX = r'(?m)(?:(?:[А-ЯA-Z]\.){1,2}|[^$!"«»#$%&()*+,\-/:;<=>?@[\]^_`{|}~ \.\n]+(?=["»]?$)|[^$!"«»#$%&()*+,\-/:;<=>?@[\]^_`{|}~ \n]+(?!["»]?$)|»|«|")'
+	WORD_REGEX = r'(?m)(?:(?:[А-ЯA-Z]\.){1,2}|[‑-‑№]|[^$!‑-‑№"«»#$%&()*+,\-/:;<=>?@[\]^_`{|}~ \.\n]+(?=["»]?$)|[^$!"‑-‑№«»#$%&()*+‑,\-/:;<=>?@[\]^_`{|}~ \n]+(?!["»]?$)|»|«|")'
 	words = []
 	cur_pos = 0
 	while True:
@@ -43,7 +42,7 @@ def create_labels_list(word_list, marks):
 	size = len(word_list)
 	while i < size:
 		result = search_pos_in_labels(word_list[i][1], marks)
-		if result is not None and result[2] != "DATE":
+		if result is not None:
 			labels_list.append(f"B-{result[2]}")
 			i += 1
 			while i<size and word_list[i][1] < result[1]:
@@ -75,11 +74,17 @@ def create_words_labels_pairs_list(train_data):
 	for text, labels in train_data:
 		sentences_list = make_sentences_list(text)
 		word_list = create_full_word_list(sentences_list)
-		for _, label in labels.items():
-			labels_list = create_labels_list(word_list, label)
-			result.append((word_list, labels_list))
-	return result
+		labels_list = [label for _, label in labels.items()]
+		if len(labels_list) == 1:
+			label = labels_list[0]
+		elif len(labels_list) == 2:
+			label = labels_list[0] & labels_list[1]
+		else:
+			label = labels_list[0] & labels_list[1] | labels_list[1] & labels_list[2] | labels_list[0] & labels_list[2]
 
+		labels_list = create_labels_list(word_list, label)
+		result.append((word_list, labels_list))
+	return result
 
 def prepare_sequence(word_list, keyedvector_model):
 	default = keyedvector_model.get_index("неизвестно")
@@ -97,12 +102,25 @@ def prepare_sequence(word_list, keyedvector_model):
 		elif re.fullmatch(r"[a-z]+", word):
 			# print(f"{word} - английский")
 			result.append(keyedvector_model.get_index("английский"))
-		elif keyedvector_model.get_index(word, default) == default and re.fullmatch(r"[A-ZА-Я]", word[0]):
-			# print(f"{word} - большая буква")
-			result.append(keyedvector_model.get_index("заглавной"))
-		# добавить еще для имён и фамилий
 		else:
 			# print(f"{word} - {keyedvector_model.get_index(word, default)}")
 			result.append(keyedvector_model.get_index(word, default))
 
 	return result
+
+def print_text_with_labels(text, labels_set):
+	dict = {}
+	for label in labels_set:
+		dict[label[0]] = (label[1], label[2])
+
+	str_res = ""
+	i = 0
+	while i < len(text):
+		if i in dict:
+			str_res += f"({text[i:dict[i][0]]})" + f"|{dict[i][1]}"
+			i = dict[i][0]
+		else:
+			str_res += text[i]
+			i+=1
+
+	print(str_res)
