@@ -11,4 +11,4 @@
 ## Install and launch
 
     git clone https://github.com/prokopk1n/bilstm
-    python main.py -i input.txt -o output_file.txt
+    python ./main.py -i input.txt -o output_file.txt
