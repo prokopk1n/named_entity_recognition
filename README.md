@@ -8,15 +8,7 @@
 
 В данной работе применяется архитектура BiLSTM + CRF, а также используется BERT-embedding:
 ![alt text](image/picture.png)
-## Install
+## Install and launch
 
-Please make sure the release file is unpacked under a Web-accessible
-directory. You shall see the following files and directories:
-
-      demos/               demos
-      framework/           framework source files
-      requirements/        requirement checker
-      CHANGELOG            describing changes in every Yii release
-      LICENSE              license of Yii
-      README               this file
-      UPGRADE              upgrading instructions
+    git clone https://github.com/prokopk1n/bilstm
+    python main.py -i input.txt -o output_file.txt
